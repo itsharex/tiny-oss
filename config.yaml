@@ -1,0 +1,9 @@
+db:
+  dsn: "admin:741741741@tcp(192.168.5.10:3306)/myoss?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai"
+
+server:
+  port: ":3005"
+
+security:
+  token: "jIfRrYcg3h2isOCl6gEOCEy280KF3mk8"
+  api_token: "yNhlRJuvFRtzduTgOcoeepciR0bQsdqo"
