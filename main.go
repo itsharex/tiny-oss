@@ -47,14 +47,14 @@ func loadConfig() error {
 }
 
 type File struct {
-	ID           int    `db:"id"`
-	UUID         string `db:"uuid"`
-	OriginalName string `db:"original_name"`
-	Filename     string `db:"filename"`
-	Size         int64  `db:"size"`
-	Ext          string `db:"ext"`
-	IsPrivate    int    `db:"is_private"`
-	CreatedAt    string `db:"created_at"`
+	ID           int    `db:"id" json:"id"`
+	UUID         string `db:"uuid" json:"uuid"`
+	OriginalName string `db:"original_name" json:"original_name"`
+	Filename     string `db:"filename" json:"filename"`
+	Size         int64  `db:"size" json:"size"`
+	Ext          string `db:"ext" json:"ext"`
+	IsPrivate    int    `db:"is_private" json:"is_private"`
+	CreatedAt    string `db:"created_at" json:"created_at"`
 }
 
 func main() {
@@ -212,8 +212,8 @@ func listFiles(c *echo.Context) error {
 	switch {
 	case pageSize < 1:
 		pageSize = 20
-	case pageSize > 50:
-		pageSize = 50
+	case pageSize > 100:
+		pageSize = 100
 	}
 	offset := (page - 1) * pageSize
 
@@ -234,7 +234,7 @@ func listFiles(c *echo.Context) error {
 	}
 
 	sql := fmt.Sprintf(`
-		SELECT id,uuid,original_name,filename,size,is_private,created_at
+		SELECT *
 		FROM files
 		ORDER BY %s %s
 		LIMIT ? OFFSET ?
