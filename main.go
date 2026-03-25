@@ -71,6 +71,7 @@ func main() {
 	_ = os.MkdirAll("./uploads", 0755)
 	e := echo.New()
 	e.Use(middleware.RequestLogger())
+	e.Use(middleware.BodyLimit(50 << 20))
 
 	// CORS 修复：去掉 echo.GET 常量
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
@@ -126,47 +127,98 @@ func upload(c *echo.Context) error {
 		return c.JSON(400, map[string]string{"msg": "请上传文件"})
 	}
 
-	ext := filepath.Ext(file.Filename)
+	ext := strings.ToLower(filepath.Ext(file.Filename))
 	uid := strings.ReplaceAll(uuid.NewString(), "-", "")
-	saveName := uid + ext
-	savePath := "./uploads/" + saveName
 
-	src, _ := file.Open()
-	defer src.Close()
-	dst, _ := os.Create(savePath)
-	defer dst.Close()
-	io.Copy(dst, src)
-
-	if isCompress == 1 && isImage(ext) {
-		compressImage(savePath, savePath, quality)
+	// 分桶目录
+	dir := filepath.Join("uploads", uid[:2], uid[2:4])
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return c.JSON(500, map[string]string{"msg": "目录创建失败"})
 	}
 
-	db.MustExec(`
-	INSERT INTO files(uuid, original_name, filename, size, ext, is_private)
-	VALUES(?,?,?,?,?,?)`,
-		uid, file.Filename, saveName, file.Size, ext, isPrivate)
+	filename := uid + ext
+	savePath := filepath.Join(dir, filename)
 
-	return c.JSON(200, map[string]string{
-		"url": c.Scheme() + "://" + c.Request().Host + "/i/" + saveName,
+	// 保存原文件
+	src, err := file.Open()
+	if err != nil {
+		return c.JSON(500, map[string]string{"msg": "文件读取失败"})
+	}
+	defer src.Close()
+
+	dst, err := os.Create(savePath)
+	if err != nil {
+		return c.JSON(500, map[string]string{"msg": "文件创建失败"})
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return c.JSON(500, map[string]string{"msg": "文件保存失败"})
+	}
+
+	// 👉 压缩（覆盖原文件）
+	if isCompress == 1 && canCompress(ext) {
+		if err := compressImage(savePath, savePath, quality); err != nil {
+			return c.JSON(500, map[string]string{"msg": "图片压缩失败"})
+		}
+	}
+
+	// 👉 获取最终文件大小（关键）
+	stat, err := os.Stat(savePath)
+	if err != nil {
+		return c.JSON(500, map[string]string{"msg": "获取文件信息失败"})
+	}
+
+	finalSize := stat.Size()
+
+	// 👉 DB 写入失败回滚文件
+	_, err = db.Exec(`
+		INSERT INTO files(uuid, original_name, filename, size, ext, is_private)
+		VALUES(?,?,?,?,?,?)`,
+		uid, file.Filename, filename, finalSize, ext, isPrivate,
+	)
+	if err != nil {
+		_ = os.Remove(savePath)
+		return c.JSON(500, map[string]string{"msg": "数据库写入失败"})
+	}
+
+	return c.JSON(200, map[string]any{
+		"url":      buildURL(c, filename),
+		"filename": filename,
+		"size":     finalSize,
 	})
+}
+
+func buildURL(c *echo.Context, filename string) string {
+	return c.Scheme() + "://" + c.Request().Host + "/i/" + filename
 }
 
 func serveFile(c *echo.Context) error {
 	filename := c.Param("filename")
-	path := "./uploads/" + filename
 
+	// 👉 分桶路径推导
+	ext := filepath.Ext(filename)
+	uuid := strings.TrimSuffix(filename, ext)
+	dir := filepath.Join("uploads", uuid[:2], uuid[2:4])
+	path := filepath.Join(dir, filename)
+
+	// 👉 DB 校验
 	var f File
-	uuid := strings.TrimSuffix(filename, filepath.Ext(filename))
-	err := db.Get(&f, "SELECT is_private FROM files WHERE uuid=?", uuid)
+	err := db.Get(&f, "SELECT is_private FROM files WHERE uuid=?", uuid[:32])
 	if err != nil {
 		return c.NoContent(404)
 	}
 
 	if f.IsPrivate == 1 {
 		token := c.QueryParam("token")
-		if token == "" || token != config.Security.Token {
+		if token != config.Security.Token {
 			return c.NoContent(403)
 		}
+	}
+
+	// 👉 文件存在检查
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return c.NoContent(404)
 	}
 
 	return c.File(path)
@@ -185,18 +237,28 @@ func compressImage(src, dst string, quality int) error {
 		img = imaging.Resize(img, 1600, 0, imaging.Lanczos)
 	}
 
+	tmp := dst + ".tmp"
+
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+
 	ext := strings.ToLower(filepath.Ext(src))
 	switch ext {
 	case ".jpg", ".jpeg":
-		f, _ := os.Create(dst)
-		defer f.Close()
-		return jpeg.Encode(f, img, &jpeg.Options{Quality: quality})
+		err = jpeg.Encode(f, img, &jpeg.Options{Quality: quality})
 	case ".png":
-		f, _ := os.Create(dst)
-		defer f.Close()
-		return png.Encode(f, img)
+		err = png.Encode(f, img)
 	}
-	return nil
+	f.Close()
+
+	if err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+
+	return os.Rename(tmp, dst) // 原子替换
 }
 
 // ==============================
@@ -269,8 +331,21 @@ func deleteFile(c *echo.Context) error {
 		return c.JSON(404, map[string]string{"msg": "文件不存在"})
 	}
 
-	_ = os.Remove("./uploads/" + f.Filename)
-	_, _ = db.Exec("DELETE FROM files WHERE id=?", id)
+	uuid := strings.Split(f.Filename, ".")[0]
+	dir := filepath.Join("uploads", uuid[:2], uuid[2:4])
+	path := filepath.Join(dir, f.Filename)
+
+	_ = os.Remove(path)
+
+	res, err := db.Exec("DELETE FROM files WHERE id=?", id)
+	if err != nil {
+		return c.JSON(500, map[string]string{"msg": "删除失败"})
+	}
+
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return c.JSON(404, map[string]string{"msg": "文件不存在"})
+	}
 
 	return c.JSON(200, map[string]string{"msg": "删除成功"})
 }
@@ -278,4 +353,9 @@ func deleteFile(c *echo.Context) error {
 func isImage(ext string) bool {
 	ext = strings.ToLower(ext)
 	return ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif"
+}
+
+func canCompress(ext string) bool {
+	ext = strings.ToLower(ext)
+	return ext == ".jpg" || ext == ".jpeg" || ext == ".png"
 }
