@@ -7,3 +7,6 @@ server:
 security:
   token: "jIfRrYcg3h2isOCl6gEOCEy280KF3mk8"
   api_token: "yNhlRJuvFRtzduTgOcoeepciR0bQsdqo"
+
+app:
+  file_base_url: "http://localhost:3005/i"
