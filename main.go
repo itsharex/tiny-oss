@@ -211,6 +211,11 @@ func serveFile(c *echo.Context) error {
 	// 👉 分桶路径推导
 	ext := filepath.Ext(filename)
 	uuid := strings.TrimSuffix(filename, ext)
+
+	if len(uuid) != 32 {
+		return c.NoContent(404)
+	}
+
 	dir := filepath.Join(getUploadDir(), uuid[:2], uuid[2:4])
 	path := filepath.Join(dir, filename)
 
