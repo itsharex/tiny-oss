@@ -10,3 +10,4 @@ security:
 
 app:
   file_base_url: "http://localhost:3005/i"
+  upload_dir: "./uploads"

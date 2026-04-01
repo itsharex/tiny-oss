@@ -31,6 +31,7 @@ type Config struct {
 		APIToken string `yaml:"api_token"`
 	} `yaml:"security"`
 	App struct {
+		UploadDir   string `yaml:"upload_dir"`
 		FileBaseURL string `yaml:"file_base_url"`
 	} `yaml:"app"`
 }
@@ -71,7 +72,11 @@ func main() {
 		panic(err)
 	}
 
-	_ = os.MkdirAll("./uploads", 0755)
+	err = os.MkdirAll(getUploadDir(), 0755)
+	if err != nil {
+		panic(err)
+	}
+
 	e := echo.New()
 	e.Use(middleware.RequestLogger())
 	e.Use(middleware.BodyLimit(50 << 20))
@@ -134,7 +139,7 @@ func upload(c *echo.Context) error {
 	uid := strings.ReplaceAll(uuid.NewString(), "-", "")
 
 	// 分桶目录
-	dir := filepath.Join("uploads", uid[:2], uid[2:4])
+	dir := filepath.Join(getUploadDir(), uid[:2], uid[2:4])
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return c.JSON(500, map[string]string{"msg": "目录创建失败"})
 	}
@@ -206,7 +211,7 @@ func serveFile(c *echo.Context) error {
 	// 👉 分桶路径推导
 	ext := filepath.Ext(filename)
 	uuid := strings.TrimSuffix(filename, ext)
-	dir := filepath.Join("uploads", uuid[:2], uuid[2:4])
+	dir := filepath.Join(getUploadDir(), uuid[:2], uuid[2:4])
 	path := filepath.Join(dir, filename)
 
 	// 👉 DB 校验
@@ -339,7 +344,7 @@ func deleteFile(c *echo.Context) error {
 	}
 
 	uuid := strings.Split(f.Filename, ".")[0]
-	dir := filepath.Join("uploads", uuid[:2], uuid[2:4])
+	dir := filepath.Join(getUploadDir(), uuid[:2], uuid[2:4])
 	path := filepath.Join(dir, f.Filename)
 
 	_ = os.Remove(path)
@@ -355,6 +360,20 @@ func deleteFile(c *echo.Context) error {
 	}
 
 	return c.JSON(200, map[string]string{"msg": "删除成功"})
+}
+
+func getUploadDir() string {
+	dir := config.App.UploadDir
+	if dir == "" {
+		dir = "./uploads"
+	}
+
+	// 转绝对路径（兼容相对路径）
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return dir // fallback
+	}
+	return abs
 }
 
 func isImage(ext string) bool {
