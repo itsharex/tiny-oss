@@ -11,3 +11,4 @@ CREATE TABLE files (
     is_private TINYINT DEFAULT 1,  -- 1=公开 2=私有
     created_at DATETIME DEFAULT NOW()
 );
+

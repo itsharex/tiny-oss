@@ -1,5 +1,5 @@
 db:
-  dsn: "admin:741741741@tcp(192.168.5.10:3306)/myoss?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai"
+  dsn: "root:12345678@tcp(127.0.0.1:3306)/myoss?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai"
 
 server:
   port: ":3005"
