@@ -8,7 +8,7 @@ CREATE TABLE files (
     filename VARCHAR(255) NOT NULL,
     size BIGINT NOT NULL,
     ext VARCHAR(10),
-    is_private TINYINT DEFAULT 1,  -- 1=公开 2=私有
+    is_private TINYINT DEFAULT 1,  -- 0=公开 1=私有
     created_at DATETIME DEFAULT NOW()
 );
 

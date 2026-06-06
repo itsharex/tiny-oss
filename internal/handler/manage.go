@@ -89,6 +89,10 @@ func DeleteFile(c *echo.Context) error {
 	// 删除文件
 	_ = os.Remove(path)
 
+	// 清理空的分桶目录
+	_ = os.Remove(filepath.Dir(path))
+	_ = os.Remove(filepath.Dir(filepath.Dir(path)))
+
 	// 删除数据库记录
 	res, err := db.DB.Exec("DELETE FROM files WHERE id=?", id)
 	if err != nil {

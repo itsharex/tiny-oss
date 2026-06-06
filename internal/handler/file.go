@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -72,8 +73,16 @@ func compressImage(src, dst string, quality int) error {
 		err = jpeg.Encode(f, img, &jpeg.Options{Quality: quality})
 	case ".png":
 		err = png.Encode(f, img)
+	default:
+		f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("unsupported image format: %s", ext)
 	}
-	f.Close()
+
+	closeErr := f.Close()
+	if err == nil {
+		err = closeErr
+	}
 
 	if err != nil {
 		_ = os.Remove(tmp)
@@ -116,11 +125,13 @@ func ServeFile(c *echo.Context) error {
 	fi, err := os.Stat(path)
 	if os.IsNotExist(err) || fi.IsDir() {
 		return c.JSON(404, map[string]string{"msg": "文件不存在"})
+	} else if err != nil {
+		return c.JSON(500, map[string]string{"msg": "读取文件失败"})
 	}
 
 	ff, err := os.Open(path)
 	if err != nil {
-		return c.JSON(404, map[string]string{"msg": "文件不存在"})
+		return c.JSON(500, map[string]string{"msg": "读取文件失败"})
 	}
 
 	http.ServeContent(c.Response(), c.Request(), fi.Name(), fi.ModTime(), ff)
@@ -137,7 +148,7 @@ func Upload(c *echo.Context) error {
 		quality = 75
 	}
 	if isPrivate != 0 && isPrivate != 1 {
-		isPrivate = 0
+		isPrivate = 1
 	}
 
 	file, err := c.FormFile("file")
